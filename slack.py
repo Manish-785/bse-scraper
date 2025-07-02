@@ -378,6 +378,8 @@ def main():
                 sent_links.add(link)
                 save_sent_link(link)
                 print(f"Sent Slack notification for: {summary_name}")
+                
+                send_slack_notification("-----\n\n")
 
             if i + 10 < len(new_announcements):
                 print("Sent 10 announcements. Waiting 60 seconds before next batch...")
