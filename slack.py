@@ -22,9 +22,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 PROMPT_TEMPLATE = (
-    "You are a financial analyst. Read the following BSE company update and summarize the key events, dates, and financial decisions. "
-    "Include any dividend announcements, board meeting outcomes, and relevant metrics. Just Give a One Liner Summary focusing on most important detail present nothing else.\n\n{text}"
-    "Dont Add anything else above or below just the summary of the text. Not even Here is the summary part\n\n"
+    "You are a financial analyst. Read the following BSE company update and write a one-line summary focusing only on the most important detail. "
+    "Do not include any introductory or closing phrases, and do not write anything except the summary itself.\n\n{text}\n"
 )
 
 def summarise_with_groq_model(text, model, stream=False, max_retries=3):
@@ -190,7 +189,13 @@ def download_pdf(url, filename):
 def format_market_cap(market_cap):
     if market_cap is None or pd.isna(market_cap):
         return ""
-    return f"₹{market_cap/1e7:.2f} Cr"
+    cr = market_cap / 1e7
+    if cr >= 1e5:
+        return f"₹{cr/1e5:.2f}L Cr"
+    elif cr >= 1e3:
+        return f"₹{cr/1e3:.2f}K Cr"
+    else:
+        return f"₹{cr:.2f} Cr"
 
 SENT_LINKS_FILE = "sent_links.txt"
 
@@ -307,6 +312,10 @@ def main():
             for ann in batch:
                 name = ann['Name']
                 link = ann['Link']
+                
+                if "newspaper publication" in name.lower():
+                    print(f"Skipping newspaper publication: {name}")
+                    continue
                 if link in sent_links:
                     print(f"Skipping duplicate link: {link}")
                     continue
@@ -320,6 +329,7 @@ def main():
 
                 mc_row = market_cap[market_cap['BSE Code'] == code]
                 nse_symbol = None
+                raw_market_cap = None
                 if not mc_row.empty:
                     company_name = mc_row.iloc[0]['Company Name']
                     nse_symbol = mc_row.iloc[0]['NSE Symbol']
@@ -331,12 +341,25 @@ def main():
                         info = ticker.info
                         market_cap_yf = info.get('marketCap', None)
                         if market_cap_yf and market_cap_yf > 0:
-                            final_market_cap = format_market_cap(market_cap_yf)
+                            # final_market_cap = format_market_cap(market_cap_yf)
+                            raw_market_cap = market_cap_yf
                         elif excel_market_cap and excel_market_cap > 0:
-                            final_market_cap = format_market_cap(excel_market_cap)
+                            # final_market_cap = format_market_cap(excel_market_cap)
+                            raw_market_cap = excel_market_cap
                     elif excel_market_cap and excel_market_cap > 0:
-                        final_market_cap = format_market_cap(excel_market_cap)
+                        # final_market_cap = format_market_cap(excel_market_cap)
+                        raw_market_cap = excel_market_cap
+                        
 
+                try:
+                    if (raw_market_cap is None) or (raw_market_cap < 500 * 1e7):
+                        print(f"Skipping due to low market cap: {raw_market_cap} for {name}")
+                        continue
+                    final_market_cap = format_market_cap(raw_market_cap)
+                except Exception:
+                    print(f"Skipping due to invalid market cap: {raw_market_cap} for {name}")
+                    continue
+                
                 summary_name = company_name if company_name else name
 
                 pdf_filename = f"temp_{int(time.time())}.pdf"
