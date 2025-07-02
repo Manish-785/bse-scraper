@@ -24,6 +24,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 PROMPT_TEMPLATE = (
     "You are a financial analyst. Read the following BSE company update and summarize the key events, dates, and financial decisions. "
     "Include any dividend announcements, board meeting outcomes, and relevant metrics. Just Give a One Liner Summary focusing on most important detail present nothing else.\n\n{text}"
+    "Dont Add anything else above or below just the summary of the text. Not even Here is the summary part\n\n"
 )
 
 def summarise_with_groq_model(text, model, stream=False, max_retries=3):
