@@ -1,0 +1,9 @@
+pandas
+selenium
+webdriver-manager
+python-dotenv
+yfinance
+requests
+openai
+PyMuPDF
+openpyxl
