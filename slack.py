@@ -176,7 +176,20 @@ def get_fo_stocks_from_excel(filename):
     for row in ws.iter_rows(min_row=2):
         cell = row[nse_col - 1]
         # Check if cell has a fill color (not white or none)
-        if cell.fill and cell.fill.fgColor and cell.fill.fgColor.type == 'rgb' and cell.fill.fgColor.rgb not in ('00000000', 'FFFFFFFF', 'FFFFFF'):
+        fill = cell.fill
+        fgColor = fill.fgColor
+        is_colored = False
+        if fill and fgColor:
+            # Check for RGB color
+            if fgColor.type == 'rgb' and fgColor.rgb not in ('00000000', 'FFFFFFFF', 'FFFFFF', None):
+                is_colored = True
+            # Check for indexed color (not default)
+            elif fgColor.type == 'indexed' and fgColor.indexed not in (64, 0):
+                is_colored = True
+            # Check for theme color (not default)
+            elif fgColor.type == 'theme':
+                is_colored = True
+        if is_colored:
             symbol = str(cell.value).strip()
             if symbol:
                 fo_symbols.add(symbol)
@@ -365,9 +378,11 @@ def main():
                 mc_row = market_cap[market_cap['BSE Code'] == code]
                 nse_symbol = None
                 raw_market_cap = None
+                industry = None
                 if not mc_row.empty:
                     company_name = mc_row.iloc[0]['Company Name']
                     nse_symbol = mc_row.iloc[0]['NSE Symbol']
+                    industry = mc_row.iloc[0]['Industry']
                     excel_market_cap = mc_row.iloc[0].get('Latest Market Cap', None)
                     market_cap_yf = None
                     if pd.notnull(nse_symbol):
@@ -429,6 +444,7 @@ def main():
                 slack_message = (
                     f"*{summary_name}* ({final_market_cap})\n"
                     f"*Summary:* {summary}\n"
+                    f"*Industry:* {industry}"
                     f"*Link:* {link}\n"
                     f"*Release Time:* {release_time}\n"
                 )
