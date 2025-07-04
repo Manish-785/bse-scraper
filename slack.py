@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 import yfinance as yf
 import requests
 import fitz
+import openpyxl
 
 # --- Summarization Backends ---
 from groq import Groq
@@ -160,17 +161,50 @@ def extract_for_summarization(pdf_path):
     doc.close()
     return formatted.strip() if formatted.strip() else None
 
+def get_fo_stocks_from_excel(filename):
+    wb = openpyxl.load_workbook(filename)
+    ws = wb.active
+    fo_symbols = set()
+    nse_col = None
+    # Find the NSE Symbol column index
+    for idx, cell in enumerate(ws[1], 1):
+        if str(cell.value).strip().lower() == "nse symbol":
+            nse_col = idx
+            break
+    if not nse_col:
+        return fo_symbols
+    for row in ws.iter_rows(min_row=2):
+        cell = row[nse_col - 1]
+        # Check if cell has a fill color (not white or none)
+        if cell.fill and cell.fill.fgColor and cell.fill.fgColor.type == 'rgb' and cell.fill.fgColor.rgb not in ('00000000', 'FFFFFFFF', 'FFFFFF'):
+            symbol = str(cell.value).strip()
+            if symbol:
+                fo_symbols.add(symbol)
+    return fo_symbols
 
-def send_slack_notification(message):
+def send_slack_notification(message, is_fo=False):
     SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
     if not SLACK_WEBHOOK_URL:
         print("SLACK_WEBHOOK_URL not set in environment.")
         return
-    payload = {
-        "text": message,
-        "username": "Event Bot",
-        "icon_emoji": ":bell:"
-    }
+    
+    if is_fo:
+        payload = {
+            "attachments": [
+                {
+                    "color": "#36a64f",
+                    "text": message,
+                },
+            ],
+            "username": "Event Bot",
+            "icon_emoji": ":bell:"
+        }
+    else:
+        payload = {
+            "text": message,
+            "username": "Event Bot",
+            "icon_emoji": ":bell:"
+        }
     response = requests.post(
         SLACK_WEBHOOK_URL,
         data=json.dumps(payload),
@@ -223,7 +257,8 @@ def main():
         .str.replace('.0', '', regex=False)
         .str.strip()
     )
-
+    fo_symbols = get_fo_stocks_from_excel("Market Cap.xlsx")
+    
     sent_links = load_sent_links()
 
     options = webdriver.ChromeOptions()
@@ -397,7 +432,8 @@ def main():
                     f"*Link:* {link}\n"
                     f"*Release Time:* {release_time}\n"
                 )
-                send_slack_notification(slack_message)
+                is_fo = True if nse_symbol and str(nse_symbol).strip() in fo_symbols else False
+                send_slack_notification(slack_message,is_fo=is_fo)
                 sent_links.add(link)
                 save_sent_link(link)
                 print(f"Sent Slack notification for: {summary_name}")
