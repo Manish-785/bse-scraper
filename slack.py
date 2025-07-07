@@ -388,7 +388,11 @@ def main():
                     if pd.notnull(nse_symbol):
                         ticker_symbol = f"{nse_symbol}.NS"
                         ticker = yf.Ticker(ticker_symbol)
-                        info = ticker.info
+                        try:
+                            info = ticker.info
+                        except Exception as e:
+                            print(f"Error fetching data for {ticker_symbol}: {e}")
+                            info = {}
                         market_cap_yf = info.get('marketCap', None)
                         if market_cap_yf and market_cap_yf > 0:
                             # final_market_cap = format_market_cap(market_cap_yf)
