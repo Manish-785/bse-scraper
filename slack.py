@@ -390,6 +390,9 @@ def main():
                 if "newspaper publication" in name.lower():
                     print(f"Skipping newspaper publication: {name}")
                     continue
+                if "Compliances-Certificate under Reg. 74 (5) of SEBI (DP) Regulations, 2018" in name:
+                    print(f"Skipping compliance certificate: {name}")
+                    continue
                 skip_keywords = [
                     "materialisation", "dematerialisation", "materialized", "materialised",
                     "dematerialized", "dematerialised", "materialization", "dematerialization"
