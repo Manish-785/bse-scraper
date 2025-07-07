@@ -12,6 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import yfinance as yf
 import requests
+import re
 import fitz
 import openpyxl
 
@@ -256,6 +257,13 @@ def save_sent_link(link):
     with open(SENT_LINKS_FILE, "a") as f:
         f.write(link + "\n")
 
+def extract_timestamp_from_text(text):
+    # Looks for DD-MM-YYYY HH:MM:SS
+    match = re.search(r'(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})', text)
+    if match:
+        return match.group(1)
+    return None
+
 def main():
     load_dotenv()
     api_key = os.getenv("OPENROUTER_API_KEY")
@@ -322,9 +330,26 @@ def main():
                         first_td = tr.find_element(By.XPATH, "./td[1]")
                         name = first_td.text.strip()
                         try:
-                            b_tags = tr.find_elements(By.XPATH, ".//b[@class='ng-binding']")
-                            timestamp_text = b_tags[0].text.strip() if b_tags else datetime.now().strftime('%d-%m-%Y %H:%M:%S')
-                        except:
+                            # Go to parent (tbody or table)
+                            parent = tr.find_element(By.XPATH, "..")
+                            # Get all tr siblings
+                            all_trs = parent.find_elements(By.XPATH, "./tr")
+                            if len(all_trs) >= 2:
+                                second_last_tr = all_trs[-2]
+                                b_tags_in_second_last = second_last_tr.find_elements(By.TAG_NAME, "b")
+                                if b_tags_in_second_last:
+                                    timestamp_text = extract_timestamp_from_text(b_tags_in_second_last[0].text)
+                                    if not timestamp_text:
+                                        print("Timestamp extraction failed, using current timestamp.")
+                                        timestamp_text = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+                                else:
+                                    print("No <b> tags found in second last row, using current timestamp.")
+                                    timestamp_text = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+                            else:
+                                print("Less than 2 rows found, using current timestamp.")
+                                timestamp_text = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+                        except Exception as e:
+                            print(f"Timestamp extraction failed: {e}")
                             timestamp_text = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
                         new_announcements.append({'Name': name, 'Link': href, 'Time': timestamp_text})
 
@@ -364,6 +389,13 @@ def main():
                 
                 if "newspaper publication" in name.lower():
                     print(f"Skipping newspaper publication: {name}")
+                    continue
+                skip_keywords = [
+                    "materialisation", "dematerialisation", "materialized", "materialised",
+                    "dematerialized", "dematerialised", "materialization", "dematerialization"
+                ]
+                if any(word in name.lower() for word in skip_keywords):
+                    print(f"Skipping materialisation/dematerialisation: {name}")
                     continue
                 if link in sent_links:
                     print(f"Skipping duplicate link: {link}")
