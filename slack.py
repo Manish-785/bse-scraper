@@ -322,10 +322,11 @@ def main():
                         first_td = tr.find_element(By.XPATH, "./td[1]")
                         name = first_td.text.strip()
                         try:
-                            timestamp_text = tds[-1].text.strip()
+                            b_tags = tr.find_elements(By.XPATH, ".//b[@class='ng-binding']")
+                            timestamp_text = b_tags[0].text.strip() if b_tags else datetime.now().strftime('%d-%m-%Y %H:%M:%S')
                         except:
                             timestamp_text = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
-                        new_announcements.append({'Name': name, 'Link': href, 'Timestamp': timestamp_text})
+                        new_announcements.append({'Name': name, 'Link': href, 'Time': timestamp_text})
 
             try:
                 next_btn = driver.find_element(By.ID, "idnext")
