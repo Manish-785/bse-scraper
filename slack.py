@@ -554,6 +554,16 @@ def process_announcement(ann, market_cap, fo_symbols, sent_links):
                 logger.warning(f"PDF cleanup failed: {e}")
         
         # Send notification
+        skip_patterns = [
+            "newspaper publication",
+            "Compliances-Certificate under Reg. 74 (5) of SEBI (DP) Regulations, 2018",
+            "materialisation", "dematerialisation", "materialized", "materialised",
+            "dematerialized", "dematerialised", "materialization", "dematerialization"
+        ]
+        
+        if any(pattern in summarise_bse_text.lower() for pattern in skip_patterns):
+            logger.info(f"Skipping announcement: {name}")
+            return False
         try:
             release_time = ann.get('Time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             slack_message = (
