@@ -561,7 +561,7 @@ def process_announcement(ann, market_cap, fo_symbols, sent_links):
             "dematerialized", "dematerialised", "materialization", "dematerialization"
         ]
         
-        if any(pattern in summarise_bse_text.lower() for pattern in skip_patterns):
+        if any(pattern in summary.lower() for pattern in skip_patterns):
             logger.info(f"Skipping announcement: {name}")
             return False
         try:
