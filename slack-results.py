@@ -1467,9 +1467,9 @@ def main():
                             continue
                     
                     # Wait between batches (except for last batch)
-                    if i + batch_size < len(filtered_announcements) and not shutdown_handler.should_shutdown():
-                        logger.info("Waiting 60 seconds before next batch...")
-                        time.sleep(60)
+                    # if i + batch_size < len(filtered_announcements) and not shutdown_handler.should_shutdown():
+                    #     logger.info("Waiting 60 seconds before next batch...")
+                    #     time.sleep(60)
                 
                 # Reset consecutive failures on successful cycle
                 consecutive_failures = 0
