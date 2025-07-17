@@ -1285,54 +1285,54 @@ def process_announcement(ann, market_cap, fo_symbols, sent_links,result_df=None,
         final_market_cap = format_market_cap(raw_market_cap)
         summary_name = company_name if company_name else name
         
-        # Process PDF
-        pdf_filename = f"temp_{int(time.time())}_{os.getpid()}.pdf"
-        summary = "Error processing PDF"
+        # # Process PDF
+        # pdf_filename = f"temp_{int(time.time())}_{os.getpid()}.pdf"
+        # summary = "Error processing PDF"
         excel_path = None
         
-        try:
-            download_pdf(link, pdf_filename)
-            text = extract_for_summarization(pdf_filename)
+        # try:
+        #     download_pdf(link, pdf_filename)
+        #     text = extract_for_summarization(pdf_filename)
             
-            if result_df is not None and df is not None:
-                excel_path = extract_financial_table_and_save(link, result_df, df)
+            # if result_df is not None and df is not None:
+            #     excel_path = extract_financial_table_and_save(link, result_df, df)
             
-            if text:
-                # Chunk if too large
-                chunks = chunk_text(text, max_chars=9000)
-                if len(chunks) == 1:
-                    summary = summarise_bse_text(chunks[0])
-                else:
-                    logger.info(f"Text too long, splitting into {len(chunks)} chunks")
-                    chunk_summaries = []
-                    for j, chunk in enumerate(chunks):
-                        logger.debug(f"Summarizing chunk {j+1}/{len(chunks)}")
-                        chunk_summary = summarise_bse_text(chunk)
-                        chunk_summaries.append(chunk_summary)
-                        time.sleep(2)  # Rate limiting
+        #     if text:
+        #         # Chunk if too large
+        #         chunks = chunk_text(text, max_chars=9000)
+        #         if len(chunks) == 1:
+        #             summary = summarise_bse_text(chunks[0])
+        #         else:
+        #             logger.info(f"Text too long, splitting into {len(chunks)} chunks")
+        #             chunk_summaries = []
+        #             for j, chunk in enumerate(chunks):
+        #                 logger.debug(f"Summarizing chunk {j+1}/{len(chunks)}")
+        #                 chunk_summary = summarise_bse_text(chunk)
+        #                 chunk_summaries.append(chunk_summary)
+        #                 time.sleep(2)  # Rate limiting
                     
-                    merged_summary_text = "\n".join(chunk_summaries)
-                    logger.debug("Summarizing merged chunk summaries")
-                    summary = summarise_bse_text(merged_summary_text)
-            else:
-                summary = "No text extracted from PDF"
+        #             merged_summary_text = "\n".join(chunk_summaries)
+        #             logger.debug("Summarizing merged chunk summaries")
+        #             summary = summarise_bse_text(merged_summary_text)
+        #     else:
+        #         summary = "No text extracted from PDF"
                 
-        except Exception as e:
-            logger.error(f"Error processing PDF for {name}: {e}")
-            summary = f"Error processing document: {str(e)}"
-        finally:
-            # Clean up PDF file
-            try:
-                if os.path.exists(pdf_filename):
-                    os.remove(pdf_filename)
-            except Exception as e:
-                logger.warning(f"Error removing PDF file: {e}")
+        # except Exception as e:
+        #     logger.error(f"Error processing PDF for {name}: {e}")
+        #     summary = f"Error processing document: {str(e)}"
+        # finally:
+        #     # Clean up PDF file
+        #     try:
+        #         if os.path.exists(pdf_filename):
+        #             os.remove(pdf_filename)
+        #     except Exception as e:
+        #         logger.warning(f"Error removing PDF file: {e}")
         
         # Send notification
         release_time = ann.get('Time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         slack_message = (
             f"*{summary_name}* ({final_market_cap})\n"
-            f"*Summary:* {summary}\n"
+            # f"*Summary:* {summary}\n"
             f"*Industry:* {industry}\n"
             f"*Link:* {link}\n"
             f"*Release Time:* {release_time}\n"
