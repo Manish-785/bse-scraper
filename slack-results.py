@@ -26,6 +26,26 @@ import sys
 from pathlib import Path
 import threading
 from functools import wraps
+import threading
+
+def get_date_input(prompt_text, default, timeout=15):
+    """
+    Prompt user for date input with a timeout.
+    If no input is received within 'timeout' seconds, return the default value.
+    """
+    user_input = [None]
+
+    def ask():
+        user_input[0] = input(f"{prompt_text} [{default}]: ").strip()
+
+    thread = threading.Thread(target=ask)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive() or not user_input[0]:
+        logger.info(f"No input received within {timeout} seconds. Using default: {default}")
+        return default
+    return user_input[0]
 
 class FinancialReportExtractor:
     def __init__(self, pdf_link: str):
@@ -1100,11 +1120,6 @@ def create_webdriver():
     except Exception as e:
         logger.error(f"Error creating webdriver: {e}")
         raise
-
-def get_date_input(prompt_text, default):
-    user_input = input(f"{prompt_text} [{default}]: ").strip()
-    return user_input if user_input else default
-
 
 def process_bse_page(driver, wait):
     """Process BSE page and extract announcements"""
