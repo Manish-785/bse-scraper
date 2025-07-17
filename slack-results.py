@@ -1,7 +1,10 @@
+import io
 import os
 import time
 import json
+from typing import List, Optional, Tuple
 import pandas as pd
+import pdfplumber
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -23,6 +26,480 @@ import sys
 from pathlib import Path
 import threading
 from functools import wraps
+
+class FinancialReportExtractor:
+    def __init__(self, pdf_link: str):
+        self.pdf_links = [pdf_link]
+        self.result_df = pd.DataFrame()
+        # Enhanced search phrases with priority order
+        self.SEARCH_PHRASES = [
+            # Primary consolidated statements (most specific)
+            "Statement of Audited Consolidated Financial Results",
+            "Audited Consolidated Financial Results",
+            "Statement of Unaudited Consolidated Financial Results", 
+            "Unaudited Consolidated Financial Results",
+            
+            # Standalone financial statements
+            "Statement of Audited Financial Results",
+            "Audited Financial Results",
+            "Statement of Unaudited Financial Results",
+            "Unaudited Financial Results",
+            
+            # Consolidated statements variations
+            "Consolidated Financial Results",
+            "Statement of Consolidated Financial Results",
+            "Consolidated Statement of Profit and Loss",
+            "Consolidated Income Statement",
+            "Consolidated Statement of Comprehensive Income",
+            "Consolidated P&L Statement",
+            
+            # Standalone statements variations
+            "Statement of Financial Results",
+            "Statement of Profit and Loss",
+            "Income Statement",
+            "Statement of Comprehensive Income",
+            "P&L Statement",
+            "Profit and Loss Account",
+            "Statement of Operations",
+            "Statement of Earnings",
+            
+            # Quarterly/periodic results
+            "Quarterly Results",
+            "Quarterly Financial Results",
+            "Quarterly Statement",
+            "Half-yearly Results",
+            "Half-yearly Financial Results",
+            "Annual Results",
+            "Annual Financial Results",
+            "Interim Results",
+            "Interim Financial Results",
+            
+            # Segment-wise results
+            "Segment-wise Results",
+            "Segmental Results",
+            "Business Segment Results",
+            "Geographic Segment Results",
+            
+            # Cash flow statements
+            "Cash Flow Statement",
+            "Statement of Cash Flows",
+            "Consolidated Cash Flow Statement",
+            "Statement of Cash Flow",
+            
+            # Balance sheet related
+            "Balance Sheet",
+            "Statement of Financial Position",
+            "Consolidated Balance Sheet",
+            "Statement of Assets and Liabilities",
+            
+            # Key financial metrics tables
+            "Key Financial Ratios",
+            "Financial Ratios",
+            "Performance Indicators",
+            "Key Performance Indicators",
+            "Financial Highlights",
+            "Financial Summary",
+            "Operating Results",
+            "Financial Performance",
+            
+            # Fallback phrases (broader)
+            "Statement of Audited Consolidated",
+            "Statement of Consolidated",
+            "Audited Consolidated",
+            "Unaudited Consolidated",
+            "Consolidated Results",
+            "Financial Results",
+            "Results Summary",
+            "Financial Statement",
+            "Financial Information",
+            "Financial Data"
+        ]
+
+        # Enhanced financial statement keywords to validate tables
+        self.FINANCIAL_KEYWORDS = [
+            # Revenue and income keywords
+            'revenue', 'income', 'sales', 'turnover', 'net sales', 'gross sales',
+            'operating revenue', 'total revenue', 'total income', 'other income',
+            'interest income', 'dividend income', 'rental income',
+            
+            # Profit and loss keywords
+            'profit', 'loss', 'net profit', 'gross profit', 'operating profit',
+            'profit before tax', 'pbt', 'profit after tax', 'pat', 'net loss',
+            'operating loss', 'comprehensive income', 'total comprehensive income',
+            
+            # Expense keywords
+            'expenses', 'total expenses', 'operating expenses', 'cost of goods sold',
+            'cogs', 'cost of sales', 'administrative expenses', 'selling expenses',
+            'finance costs', 'financial expenses', 'interest expenses',
+            'depreciation', 'amortization', 'impairment', 'provisions',
+            
+            # EBITDA and related metrics
+            'ebitda', 'ebit', 'operating income', 'operating margin',
+            'gross margin', 'net margin', 'profit margin',
+            
+            # Tax related
+            'tax', 'income tax', 'current tax', 'deferred tax', 'tax expenses',
+            'provision for tax', 'tax benefit',
+            
+            # Earnings metrics
+            'earnings', 'earnings per share', 'eps', 'diluted eps', 'basic eps',
+            'weighted average shares', 'dividend per share', 'dps',
+            
+            # Balance sheet items
+            'assets', 'liabilities', 'equity', 'current assets', 'non-current assets',
+            'total assets', 'current liabilities', 'non-current liabilities',
+            'total liabilities', 'shareholders equity', 'retained earnings',
+            'reserves', 'share capital', 'working capital',
+            
+            # Cash flow items
+            'cash flow', 'operating cash flow', 'investing cash flow',
+            'financing cash flow', 'free cash flow', 'cash and cash equivalents',
+            'net cash', 'cash generated', 'cash used',
+            
+            # Financial ratios and metrics
+            'return on equity', 'roe', 'return on assets', 'roa', 'debt to equity',
+            'current ratio', 'quick ratio', 'debt ratio', 'asset turnover',
+            'inventory turnover', 'receivables turnover',
+            
+            # Segment-wise keywords
+            'segment', 'business segment', 'geographic segment', 'product segment',
+            'division', 'subsidiary', 'joint venture', 'associate',
+            
+            # Time period indicators
+            'quarter', 'quarterly', 'half-year', 'annual', 'year-to-date', 'ytd',
+            'current year', 'previous year', 'corresponding period',
+            
+            # Common financial terms
+            'total', 'subtotal', 'gross', 'net', 'operating', 'non-operating',
+            'recurring', 'non-recurring', 'exceptional', 'extraordinary',
+            'restated', 'standalone', 'consolidated', 'audited', 'unaudited',
+            
+            # Currency and units
+            'crores', 'lakhs', 'millions', 'billions', 'thousands', 'rs', 'inr',
+            'usd', 'eur', 'gbp', 'amount', 'value', 'figure'
+        ]
+
+        # Additional validation keywords for specific statement types
+        self.STATEMENT_TYPE_KEYWORDS = {
+            'profit_loss': [
+                'profit', 'loss', 'income', 'revenue', 'expenses', 'ebitda',
+                'depreciation', 'tax', 'earnings', 'margin'
+            ],
+            'balance_sheet': [
+                'assets', 'liabilities', 'equity', 'capital', 'reserves',
+                'current', 'non-current', 'total assets', 'total liabilities'
+            ],
+            'cash_flow': [
+                'cash flow', 'operating activities', 'investing activities',
+                'financing activities', 'cash generated', 'cash used'
+            ],
+            'ratios': [
+                'ratio', 'percentage', 'times', 'days', 'turnover',
+                'return', 'margin', 'coverage'
+            ]
+        }
+
+        # Keywords to identify table headers and structure
+        self.TABLE_STRUCTURE_KEYWORDS = [
+            'particulars', 'description', 'items', 'details', 'account',
+            'current year', 'previous year', 'march', 'september',
+            'q1', 'q2', 'q3', 'q4', 'fy', 'financial year',
+            'consolidated', 'standalone', 'audited', 'unaudited',
+            'amount in', 'figures in', 'rs in', 'inr in'
+        ]
+            
+        # Headers to avoid (these are usually not the main financial table)
+        self.EXCLUDE_HEADERS = [
+            'auditor', 'director', 'compliance', 'disclosure', 'notes',
+            'segment', 'subsidiary', 'associate', 'investment'
+        ]
+
+    def download_pdf(self, url: str, timeout: int = 30) -> io.BytesIO:
+        """Download PDF with better error handling and headers"""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/pdf,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive",
+        }
+        
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout, stream=True)
+            response.raise_for_status()
+            
+            # Check if it's actually a PDF
+            content_type = response.headers.get('content-type', '').lower()
+            if 'pdf' not in content_type and not url.lower().endswith('.pdf'):
+                logger.warning(f"URL might not be a PDF: {url}")
+            
+            return io.BytesIO(response.content)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error downloading {url}: {e}")
+            raise
+    
+    def find_table_location(self, pdf_bytes: io.BytesIO) -> Optional[Tuple[int, float, str]]:
+        """Find the best location for the primary consolidated financial table."""
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        best_match = None
+        highest_score = 0
+
+        try:
+            for page_num in range(min(len(doc), 10)): # Check first 10 pages
+                page = doc[page_num]
+                page_text = page.get_text("text").lower()
+                
+                # Prioritize pages that contain both the title and header keywords
+                has_title_phrase = any(phrase.lower() in page_text for phrase in self.SEARCH_PHRASES)
+                has_financial_keywords = sum(1 for kw in ['particulars', 'revenue from operations', 'profit before tax', 'total income'] if kw in page_text) > 1
+
+                if not has_title_phrase:
+                    continue
+
+                for phrase in self.SEARCH_PHRASES:
+                    text_instances = page.search_for(phrase, quads=True)
+                    if text_instances:
+                        # Score based on phrase priority and presence of financial keywords
+                        score = (len(self.SEARCH_PHRASES) - self.SEARCH_PHRASES.index(phrase)) * 2
+                        score += has_financial_keywords * 5 # Give a high score if financial keywords are present
+
+                        if score > highest_score:
+                            highest_score = score
+                            # Get the vertical position of the found phrase
+                            y_position = max(q.rect.y1 for q in text_instances)
+                            best_match = (page_num, y_position, phrase)
+        finally:
+            doc.close()
+
+        if best_match:
+            logger.info(f"Best table match found on page {best_match[0] + 1} with phrase: '{best_match[2]}'")
+        else:
+            logger.warning("Could not find a suitable table location.")
+            
+        return best_match
+    
+    def validate_table(self, table: List[List[str]], link: str) -> bool:
+        """Validate if the extracted table is a legitimate financial statement."""
+        if not table or len(table) < 4:  # Require at least a header and a few rows of data
+            return False
+
+        table_text = ' '.join([' '.join(cell for cell in row if cell) for row in table]).lower()
+        
+        # More stringent keyword check
+        financial_keyword_count = sum(1 for keyword in self.FINANCIAL_KEYWORDS if keyword in table_text)
+        
+        # Check for presence of "Particulars" in the first column of the first few rows
+        has_particulars = any("particulars" in str(row[0]).lower() for row in table[:3] if row)
+
+        numeric_cells = sum(1 for row in table for cell in row if cell and self._is_numeric_value(cell))
+        total_cells = sum(len(row) for row in table)
+        numeric_ratio = numeric_cells / total_cells if total_cells > 0 else 0
+
+        # Stricter validation criteria
+        is_valid = (financial_keyword_count >= 3 or has_particulars) and numeric_ratio > 0.2 and len(table[0]) > 2
+        logger.info(f"Table validation for {link}: Keywords found: {financial_keyword_count}, Numeric Ratio: {numeric_ratio:.2f}, Valid: {is_valid}")
+        
+        return is_valid
+    
+    def _calculate_phrase_score(self, phrase: str, page_text: str) -> float:
+        """Calculate relevance score for a phrase match"""
+        base_score = len(self.SEARCH_PHRASES) - self.SEARCH_PHRASES.index(phrase)
+        
+        # Bonus for financial keywords in context
+        context_bonus = sum(1 for keyword in self.FINANCIAL_KEYWORDS 
+                          if keyword in page_text) * 0.1
+        
+        # Penalty for exclusion keywords
+        exclusion_penalty = sum(1 for keyword in self.EXCLUDE_HEADERS 
+                              if keyword in page_text) * 0.2
+        
+        return base_score + context_bonus - exclusion_penalty
+
+    def _is_numeric_value(self, value: str) -> bool:
+        """Check if a value represents a number (including formatted numbers)"""
+        if not value:
+            return False
+        
+        # Remove common formatting
+        clean_value = re.sub(r'[,\s()₹$]', '', str(value).strip())
+        clean_value = re.sub(r'[^\d.-]', '', clean_value)
+        
+        try:
+            float(clean_value)
+            return True
+        except ValueError:
+            return False
+
+    def extract_consolidated_table(self, pdf_bytes: io.BytesIO, max_pages: int = 5) -> Optional[List[List]]:
+        """Extract consolidated financial table with improved logic"""
+        
+        # Find the best table location
+        location = self.find_table_location(pdf_bytes)
+        if not location:
+            logger.warning("No matching phrases found")
+            return None
+            
+        found_page, found_y, matched_phrase = location
+        logger.info(f"Found table at page {found_page + 1}, phrase: '{matched_phrase}'")
+        
+        pdf_bytes.seek(0)
+        tables = []
+        header = None
+        
+        try:
+            with pdfplumber.open(pdf_bytes) as pdf:
+                # Extract from the found page
+                page = pdf.pages[found_page]
+                
+                # Crop with some margin above the found text
+                margin = 20  # pixels
+                cropped = page.within_bbox((0, max(0, found_y - margin), 
+                                          page.width, page.height))
+                
+                page_tables = cropped.extract_tables()
+                if not page_tables:
+                    logger.warning("No tables found in cropped area")
+                    return None
+                
+                # Find the best table on the page
+                best_table = self._select_best_table(page_tables)
+                if not best_table:
+                    logger.warning("No valid table found on the page")
+                    return None
+                
+                tables.append(best_table)
+                header = best_table[0] if best_table else None
+                
+                # Extract from subsequent pages if header matches
+                for next_page_num in range(found_page + 1, 
+                                         min(found_page + max_pages, len(pdf.pages))):
+                    next_page = pdf.pages[next_page_num]
+                    next_tables = next_page.extract_tables()
+                    
+                    if not next_tables:
+                        break
+                    
+                    # Find matching table on next page
+                    matching_table = self._find_matching_table(next_tables, header)
+                    if matching_table:
+                        tables.append(matching_table[1:])  # Skip header row
+                        logger.info(f"Extended table from page {next_page_num + 1}")
+                    else:
+                        break  # Stop if no matching table found
+                        
+        except Exception as e:
+            logger.error(f"Error extracting table: {e}")
+            return None
+        
+        # Merge all table parts
+        merged_table = self._merge_tables(tables)
+        return merged_table if merged_table else None
+
+    def _select_best_table(self, tables: List[List[List]]) -> Optional[List[List]]:
+        """Select the most likely financial table from multiple tables"""
+        if not tables:
+            return None
+            
+        best_table = None
+        best_score = 0
+        
+        for table in tables:
+            if not table or len(table) < 2:
+                continue
+                
+            # Score based on size and content
+            size_score = min(len(table), 20) * 0.5  # Prefer reasonable size
+            
+            # Check for financial content
+            table_text = ' '.join([' '.join(str(cell) for cell in row if cell) 
+                                 for row in table[:5]]).lower()  # Check first 5 rows
+            
+            content_score = sum(1 for keyword in self.FINANCIAL_KEYWORDS 
+                              if keyword in table_text)
+            
+            total_score = size_score + content_score
+            
+            if total_score > best_score:
+                best_score = total_score
+                best_table = table
+                
+        return best_table
+
+    def _find_matching_table(self, tables: List[List[List]], 
+                           target_header: List) -> Optional[List[List]]:
+        """Find table with matching header structure"""
+        if not target_header or not tables:
+            return None
+            
+        for table in tables:
+            if not table or len(table) < 1:
+                continue
+                
+            table_header = table[0]
+            
+            # Check if headers match (allowing for some flexibility)
+            if self._headers_match(table_header, target_header):
+                return table
+                
+        return None
+
+    def _headers_match(self, header1: List, header2: List, threshold: float = 0.7) -> bool:
+        """Check if two headers match with some tolerance"""
+        if not header1 or not header2:
+            return False
+            
+        # Simple length check
+        if abs(len(header1) - len(header2)) > 2:
+            return False
+            
+        # Check content similarity
+        h1_text = ' '.join(str(cell) for cell in header1 if cell).lower()
+        h2_text = ' '.join(str(cell) for cell in header2 if cell).lower()
+        
+        if not h1_text or not h2_text:
+            return False
+            
+        # Simple similarity check
+        common_words = set(h1_text.split()) & set(h2_text.split())
+        total_words = set(h1_text.split()) | set(h2_text.split())
+        
+        similarity = len(common_words) / len(total_words) if total_words else 0
+        return similarity >= threshold
+
+    def _merge_tables(self, tables: List[List[List]]) -> List[List]:
+        """Merge multiple table parts into one"""
+        if not tables:
+            return []
+            
+        merged = []
+        for i, table in enumerate(tables):
+            if i == 0:
+                merged.extend(table)
+            else:
+                merged.extend(table)  # Headers already removed for continuation pages
+                
+        return merged
+
+    def clean_table_data(self, table: List[List]) -> List[List]:
+        """Clean and standardize table data"""
+        if not table:
+            return table
+            
+        cleaned = []
+        for row in table:
+            cleaned_row = []
+            for cell in row:
+                if cell is None:
+                    cleaned_row.append('')
+                else:
+                    # Clean cell content
+                    cell_str = str(cell).strip()
+                    # Remove excessive whitespace
+                    cell_str = re.sub(r'\s+', ' ', cell_str)
+                    cleaned_row.append(cell_str)
+            cleaned.append(cleaned_row)
+            
+        return cleaned
+
 
 # --- Enhanced Logging Setup ---
 def setup_logging():
@@ -382,6 +859,64 @@ def get_fo_stocks_from_excel(filename):
         return set()
 
 @retry_on_failure(max_retries=3, delay=2)
+def extract_financial_table_and_save(pdf_link, result_df, df, temp_dir="temp_tables"):
+    """
+    Extracts the consolidated financial table from the PDF link, saves it as an Excel file,
+    and returns the file path. Returns None if extraction fails.
+    """
+    try:
+        os.makedirs(temp_dir, exist_ok=True)
+        extractor = FinancialReportExtractor(pdf_link)
+        extractor.result_df = result_df
+        extractor.df = df
+        
+        pdf_bytes = extractor.download_pdf(pdf_link)
+        raw_table = extractor.extract_consolidated_table(pdf_bytes)
+
+        # The raw_table is a list of lists; it needs to be validated before cleaning.
+        if raw_table and extractor.validate_table(raw_table):
+            cleaned_df_table = extractor.clean_table_data(raw_table)
+            
+            if cleaned_df_table:
+                if len(cleaned_df_table)> 0:
+                    header = cleaned_df_table[0]
+                    data_rows = cleaned_df_table[1:]
+                    df_table = pd.DataFrame(data_rows, columns=header)
+                else:
+                    df_table = pd.DataFrame()
+            
+            if not df_table.empty:
+                df_table['Source_Link'] = pdf_link
+                try:
+                    name_row = df[df['Link'] == pdf_link]['Name'].values[0]
+                    bse_code = name_row.split('-')[1].strip()
+                except Exception:
+                    bse_code = ""
+
+                if 'BSE Code' not in df_table.columns:
+                    df_table.insert(0, "BSE Code", bse_code)
+                else:
+                    df_table['BSE Code'] = bse_code
+                
+                
+
+                # Save the DataFrame to an Excel file
+                excel_path = os.path.join(temp_dir, f"financial_table_{int(time.time())}.xlsx")
+                df_table.to_excel(excel_path, index=False)
+                logger.info(f"Successfully extracted and saved financial table to {excel_path}")
+                return excel_path
+            else:
+                logger.warning(f"Table for {pdf_link} was empty after cleaning.")
+                return None
+        else:
+            logger.info(f"No valid financial table found in {pdf_link}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error extracting financial table for {pdf_link}: {e}", exc_info=True)
+        return None
+
+@retry_on_failure(max_retries=3, delay=2)
 def send_slack_notification(message, is_fo=False):
     """Send Slack notification with retry logic"""
     SLACK_WEBHOOK_URL1 = os.getenv("SLACK_RESULT_WEBHOOK")
@@ -425,6 +960,55 @@ def send_slack_notification(message, is_fo=False):
     return True
 
 @retry_on_failure(max_retries=3, delay=2)
+def send_slack_notification_with_file(message, file_path=None, is_fo=False):
+    """
+    Sends a Slack notification. If a file_path is provided, it uploads the file
+    with the message as an initial comment. Otherwise, it sends a plain text message via webhook.
+    """
+    # --- Case 1: Uploading a file with a message using a Bot Token ---
+    if file_path and os.path.exists(file_path):
+        SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
+        SLACK_CHANNEL = os.getenv("SLACK_CHANNEL") # Must be a Channel ID, not name
+
+        if not all([SLACK_BOT_TOKEN, SLACK_CHANNEL]):
+            logger.error("Cannot upload file: SLACK_BOT_TOKEN or SLACK_CHANNEL is not set in .env file.")
+            logger.info("Falling back to sending a text-only notification.")
+            return send_slack_notification(message, is_fo) # Fallback to webhook
+
+        logger.info(f"Attempting to upload '{os.path.basename(file_path)}' to Slack channel {SLACK_CHANNEL}.")
+        try:
+            with open(file_path, "rb") as file_content:
+                response = requests.post(
+                    "https://slack.com/api/files.upload",
+                    headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+                    data={
+                        "channels": SLACK_CHANNEL,
+                        "initial_comment": message,
+                        "filename": os.path.basename(file_path)
+                    },
+                    files={"file": file_content},
+                    timeout=30
+                )
+            response.raise_for_status()
+            
+            if not response.json().get("ok"):
+                # This will log detailed errors from Slack like 'not_in_channel' or 'invalid_auth'
+                logger.error(f"Failed to upload file to Slack. API Response: {response.text}")
+                return False
+
+            logger.info("File successfully uploaded to Slack with the summary message.")
+            return True
+        except Exception as e:
+            logger.error(f"An exception occurred during file upload to Slack: {e}")
+            return False
+
+    # --- Case 2: Sending a text-only message using a Webhook ---
+    else:
+        if file_path:
+            logger.warning(f"File path '{file_path}' was provided but file not found. Sending text-only notification.")
+        return send_slack_notification(message, is_fo)
+
+@retry_on_failure(max_retries=3, delay=2)
 def download_pdf(url, filename):
     """Download PDF with retry logic"""
     logger.debug(f"Downloading PDF from {url}")
@@ -462,7 +1046,7 @@ def load_sent_links():
     logger.debug("Loading sent links")
     
     if not os.path.exists(SENT_LINKS_FILE):
-        logger.debug("Sent links file not found, creating new set")
+        logger.debug("Sent links file not found, creating set")
         return set()
     
     try:
@@ -517,12 +1101,19 @@ def create_webdriver():
         logger.error(f"Error creating webdriver: {e}")
         raise
 
+def get_date_input(prompt_text, default):
+    user_input = input(f"{prompt_text} [{default}]: ").strip()
+    return user_input if user_input else default
+
+
 def process_bse_page(driver, wait):
     """Process BSE page and extract announcements"""
     logger.info("Processing BSE page")
     
     # Set date filters
-    from_date = to_date = datetime.today().strftime("%d/%m/%Y")
+    today_date = datetime.today().strftime("%d/%m/%Y")
+    from_date = get_date_input("Enter From Date (DD/MM/YYYY)", today_date)
+    to_date = get_date_input("Enter To Date (DD/MM/YYYY)", today_date)
     
     wait.until(EC.presence_of_element_located((By.ID, "txtFromDt")))
     wait.until(EC.presence_of_element_located((By.ID, "txtToDt")))
@@ -619,7 +1210,7 @@ def process_bse_page(driver, wait):
     logger.info(f"Found {len(new_announcements)} total announcements")
     return new_announcements
 
-def process_announcement(ann, market_cap, fo_symbols, sent_links):
+def process_announcement(ann, market_cap, fo_symbols, sent_links,result_df=None, df=None):
     """Process individual announcement with comprehensive error handling"""
     name = ann['Name']
     link = ann['Link']
@@ -682,10 +1273,14 @@ def process_announcement(ann, market_cap, fo_symbols, sent_links):
         # Process PDF
         pdf_filename = f"temp_{int(time.time())}_{os.getpid()}.pdf"
         summary = "Error processing PDF"
+        excel_path = None
         
         try:
             download_pdf(link, pdf_filename)
             text = extract_for_summarization(pdf_filename)
+            
+            if result_df is not None and df is not None:
+                excel_path = extract_financial_table_and_save(link, result_df, df)
             
             if text:
                 # Chunk if too large
@@ -730,16 +1325,23 @@ def process_announcement(ann, market_cap, fo_symbols, sent_links):
         
         is_fo = nse_symbol and str(nse_symbol).strip() in fo_symbols
         
-        if send_slack_notification(slack_message, is_fo=is_fo):
+        if send_slack_notification_with_file(slack_message, file_path=excel_path, is_fo=is_fo):
+            logger.info(f"excel file sent to Slack: {excel_path}")
             sent_links.add(link)
             save_sent_link(link)
             logger.info(f"Successfully processed and sent notification for: {summary_name}")
             health_monitor.record_success()
+            # Clean up Excel file
+            if excel_path and os.path.exists(excel_path):
+                try:
+                    os.remove(excel_path)
+                except Exception as e:
+                    logger.warning(f"Error removing Excel file: {e}")
             return True
         else:
             logger.error(f"Failed to send notification for: {summary_name}")
             return False
-            
+
     except Exception as e:
         logger.error(f"Error processing announcement {name}: {e}")
         logger.error(traceback.format_exc())
@@ -839,7 +1441,7 @@ def main():
                             break
                             
                         try:
-                            success = process_announcement(ann, market_cap, fo_symbols, sent_links)
+                            success = process_announcement(ann, market_cap, fo_symbols, sent_links,result_df=market_cap,df=market_cap)
                             if success:
                                 # Send separator
                                 send_slack_notification("-----\n\n")
